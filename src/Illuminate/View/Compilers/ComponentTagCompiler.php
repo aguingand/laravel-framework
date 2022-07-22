@@ -498,9 +498,11 @@ class ComponentTagCompiler
      */
     protected function getAttributesFromAttributeString(string $attributeString)
     {
-        $attributeString = $this->parseAttributeBag($attributeString);
+        $attributes = [];
 
-        $attributeString = $this->parseStatements($attributeString);
+        $attributeString = $this->parseAttributeBag($attributeString, $attributes);
+
+        $attributeString = $this->parseStatements($attributeString, $attributes);
 
         $attributeString = $this->parseBindAttributes($attributeString);
 
@@ -520,7 +522,8 @@ class ComponentTagCompiler
             )?
         /x';
 
-        if (! preg_match_all($pattern, $attributeString, $matches, PREG_SET_ORDER)) {
+        if (! preg_match_all($pattern, $attributeString, $matches, PREG_SET_ORDER)
+            && empty($attributes)) {
             return [];
         }
 
@@ -549,7 +552,7 @@ class ComponentTagCompiler
             }
 
             return [$attribute => $value];
-        })->toArray();
+        })->merge($attributes)->toArray();
     }
 
     /**
@@ -558,14 +561,19 @@ class ComponentTagCompiler
      * @param  string  $attributeString
      * @return string
      */
-    protected function parseAttributeBag(string $attributeString)
+    protected function parseAttributeBag(string $attributeString, array &$attributes)
     {
         $pattern = "/
             (?:^|\s+)                                        # start of the string or whitespace between attributes
             \{\{\s*(\\\$attributes(?:[^}]+?(?<!\s))?)\s*\}\} # exact match of attributes variable being echoed
         /x";
 
-        return preg_replace($pattern, ' :attributes="$1"', $attributeString);
+        return preg_replace_callback($pattern, function ($match) use (&$attributes) {
+            $attributes['attributes'] = $match[1];
+            $this->boundAttributes['attributes'] = true;
+
+            return '';
+        }, $attributeString);
     }
 
     /**
@@ -592,17 +600,19 @@ class ComponentTagCompiler
      * @param  string  $attributeString
      * @return string
      */
-    protected function parseStatements(string $attributeString)
+    protected function parseStatements(string $attributeString, array &$attributes)
     {
-         return preg_replace_callback(
-             '/@(class)(\( ( (?>[^()]+) | (?2) )* \))/x', function ($match) {
-                 if($match[1] === 'class') {
-                     $match[2] = str_replace('"', "'", $match[2]);
-                     return ":class=\"\Illuminate\Support\Arr::toCssClasses{$match[2]}\"";
-                 }
-                 return $match[0];
-             }, $attributeString
-        );
+        $pattern = "/@(class)(\( ( (?>[^()]+) | (?2) )* \))/x";
+
+        return preg_replace_callback($pattern, function ($match) use (&$attributes) {
+            if ($match[1] === 'class') {
+                $attributes['class'] = "\Illuminate\Support\Arr::toCssClasses{$match[2]}";
+                $this->boundAttributes['class'] = true;
+
+                return '';
+            }
+            return $match[0];
+        }, $attributeString);
     }
 
     /**
